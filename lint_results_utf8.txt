@@ -1,0 +1,36 @@
+﻿
+> advirus-evolution@0.1.0 lint
+> eslint
+
+
+C:\Users\Administrator\.gemini\antigravity\scratch\advirus-evolution\src\app\api\auth\sync-state\route.ts
+  22:15  warning  'clientState' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  33:14  warning  'error' is defined but never used                 @typescript-eslint/no-unused-vars
+
+C:\Users\Administrator\.gemini\antigravity\scratch\advirus-evolution\src\app\api\game\mutate\route.ts
+   2:36  warning  'parseTelegramInitData' is defined but never used    @typescript-eslint/no-unused-vars
+  10:15  warning  'signature' is assigned a value but never used       @typescript-eslint/no-unused-vars
+  11:15  warning  'idempotencyKey' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  37:15  warning  'rarities' is assigned a value but never used        @typescript-eslint/no-unused-vars
+
+C:\Users\Administrator\.gemini\antigravity\scratch\advirus-evolution\src\app\layout.tsx
+  13:53  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  14:33  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+C:\Users\Administrator\.gemini\antigravity\scratch\advirus-evolution\src\app\page.tsx
+  28:6   warning  React Hook useEffect has missing dependencies: 'calculateEnergyRefill' and 'checkStreak'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+  65:40  error    Unexpected any. Specify a different type                                                                                                      @typescript-eslint/no-explicit-any
+
+C:\Users\Administrator\.gemini\antigravity\scratch\advirus-evolution\src\components\VirusEngine.tsx
+   28:53  warning  'id' is defined but never used                                                                                  @typescript-eslint/no-unused-vars
+  124:8   warning  React Hook useEffect has a missing dependency: 'renderVirus'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  129:8   warning  React Hook useEffect has a missing dependency: 'renderVirus'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Administrator\.gemini\antigravity\scratch\advirus-evolution\src\lib\monetag.ts
+  26:38  warning  'sessionId' is defined but never used  @typescript-eslint/no-unused-vars
+
+C:\Users\Administrator\.gemini\antigravity\scratch\advirus-evolution\src\store\gameStore.ts
+  27:23  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+Γ£û 15 problems (4 errors, 11 warnings)
+

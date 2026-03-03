@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                   String   @id @default(cuid())
+  telegramId           String   @unique
+  username             String?
+  firstName            String?
+  points               Int      @default(0)
+  gold                 Int      @default(0)
+  energy               Int      @default(10)
+  lastEnergyUpdate     DateTime @default(now())
+  currentStreak        Int      @default(1)
+  lastLoginDate        String?
+  lastStreakClaimDate  String?
+  dailyAdsWatched      Int      @default(0)
+  lastAdWatchTime      DateTime?
+  dailyEnergyRefills   Int      @default(0)
+  dailyComboClaimed    Boolean  @default(false)
+  dailyCombo           String[] // Array of trait IDs acquired today
+  offlinePointsRate    Int      @default(0)
+  lastOfflineClaim     DateTime @default(now())
+  offlineCards         String[] // Array of card IDs
+  highestLevelReached  Int      @default(0)
+  
+  // Relations
+  virus                Virus?
+  transactions         Transaction[]
+  swarm                Swarm?   @relation(fields: [swarmId], references: [id])
+  swarmId              String?
+  
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+model Virus {
+  id              String   @id @default(cuid())
+  user            User     @relation(fields: [userId], references: [id])
+  userId          String   @unique
+  level           Int      @default(0)
+  progress        Float    @default(0)
+  mutations       Int      @default(0)
+  synergyScore    Float    @default(1.0)
+  genome          Json     // Array structure: [{ layerId, traitId, hex }]
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  type        String   // EARN, SPEND
+  context     String   // MUTATION, OFFLINE_CARD, STAR_PAYMENT, INFECTION
+  amount      Int
+  currency    String   // POINTS, GOLD, STARS
+  timestamp   DateTime @default(now())
+
+  // P1-TRANSACTION-LEAK FIX: Index for fast adSessionId replay checks
+  @@index([userId, context])
+}
+
+model Swarm {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  chiefId       String   // Telegram ID of leader
+  members       User[]
+  totalSynergy  Float    @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model ItemCatalog {
+  id          String   @id @default(cuid())
+  itemId      String   @unique
+  name        String
+  price       Int      // Price in POINTS
+  starPrice   Int      // Price in STARS
+  type        String   // OFFLINE_CARD, COSMETIC, ENERGY_BOOST
+}
