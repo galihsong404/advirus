@@ -82,9 +82,9 @@ export async function POST(req: NextRequest) {
                 throw new Error('ERR_ENERGY_DEPLETED');
             }
 
-            // E. Logic: Calculate Trait & Reward (Identical to previous logic but DB-backed)
-            const backgroundList = ['bg_digital_void', 'bg_biohazard_lab', 'bg_cosmic_nebula', 'bg_cyber_city', 'bg_frozen_data', 'bg_molten_core', 'bg_glitch_server'];
-            const chosenBg = backgroundList[Math.floor(Math.random() * backgroundList.length)];
+            // E. Logic: Calculate Reward & Server-Side Evolution
+            const MUTATIONS_PER_LEVEL = 15;
+            const PROGRESS_PER_MUTATION = parseFloat((100 / MUTATIONS_PER_LEVEL).toFixed(2)); // ~6.67
 
             const rarRoll = Math.random();
             let rarity: 'Common' | 'Rare' | 'Legendary' | 'Mythic' = 'Common';
@@ -94,7 +94,8 @@ export async function POST(req: NextRequest) {
             else if (rarRoll > 0.90) { rarity = 'Legendary'; R = 2.0; B = 2.5; }
             else if (rarRoll > 0.70) { rarity = 'Rare'; R = 1.5; B = 1.5; }
 
-            const synergyScore = parseFloat((3 * B * (1 + 0.2 * user.virus.level) * R).toFixed(2));
+            const currentLevel = user.virus.level;
+            const synergyScore = parseFloat((3 * B * (1 + 0.2 * currentLevel) * R).toFixed(2));
             const streakMultiplier = (Math.min(user.currentStreak, 30) / 10) + 1;
             const pointsEarned = Math.floor(synergyScore * 250 * streakMultiplier);
 
@@ -104,7 +105,21 @@ export async function POST(req: NextRequest) {
             else if (goldRoll > 0.90) goldEarned = Math.floor(Math.random() * 41) + 10;
             else if (goldRoll > 0.60) goldEarned = Math.floor(Math.random() * 5) + 1;
 
-            // F. Update Models
+            // F. SERVER-SIDE LEVEL-UP LOGIC
+            let newProgress = parseFloat((user.virus.progress + PROGRESS_PER_MUTATION).toFixed(2));
+            let newLevel = currentLevel;
+            let didLevelUp = false;
+
+            if (newProgress >= 100 && newLevel < 10) {
+                newLevel = currentLevel + 1;
+                newProgress = 0;
+                didLevelUp = true;
+            } else if (newProgress >= 100) {
+                // Max level reached, cap progress
+                newProgress = 100;
+            }
+
+            // G. Update User Points/Energy
             const updatedUser = await tx.user.update({
                 where: { id: user.id },
                 data: {
@@ -114,28 +129,60 @@ export async function POST(req: NextRequest) {
                     lastEnergyUpdate: now,
                     dailyAdsWatched: dailyAdsWatched + 1,
                     lastAdWatchTime: now,
-                    lastLoginDate: today
+                    lastLoginDate: today,
+                    highestLevelReached: Math.max(user.highestLevelReached || 0, newLevel)
                 }
             });
 
-            // P0-GENOME-LOST FIX: Actually update the genome in the database
+            // H. Update Genome (Sprite + Background)
             const currentGenome = (user.virus.genome as any[]) || [];
             const updatedGenome = [...currentGenome];
-            const bgIdx = updatedGenome.findIndex((t: any) => t.layerId === 'background_layer');
-            const newBgTrait = { layerId: 'background_layer', traitId: chosenBg, hex: '#000000' };
-            if (bgIdx !== -1) updatedGenome[bgIdx] = newBgTrait;
-            else updatedGenome.push(newBgTrait);
 
+            // H1. Update monster sprite on level-up
+            if (didLevelUp && newLevel <= 10) {
+                const spriteIdx = updatedGenome.findIndex((t: any) => t.layerId === 'master_sprite');
+                const newSprite = { layerId: 'master_sprite', traitId: `monster_lvl${newLevel}_v1`, hex: '#00ffcc' };
+                if (spriteIdx !== -1) updatedGenome[spriteIdx] = newSprite;
+                else updatedGenome.push(newSprite);
+            }
+
+            // H2. Background changes ONLY on level-up (deterministic map)
+            const levelBackgroundMap: Record<number, string> = {
+                0: 'bg_digital_void',
+                1: 'bg_biohazard_lab',
+                2: 'bg_cosmic_nebula',
+                3: 'bg_cyber_city',
+                4: 'bg_frozen_data',
+                5: 'bg_molten_core',
+                6: 'bg_glitch_server',
+                7: 'bg_zen_bridge',
+                8: 'bg_deep_sea',
+                9: 'bg_float_island',
+                10: 'bg_solar_flare'
+            };
+
+            let chosenBg = levelBackgroundMap[currentLevel] || 'bg_digital_void'; // current bg
+            if (didLevelUp) {
+                chosenBg = levelBackgroundMap[newLevel] || 'bg_solar_flare';
+                const bgIdx = updatedGenome.findIndex((t: any) => t.layerId === 'background_layer');
+                const newBgTrait = { layerId: 'background_layer', traitId: chosenBg, hex: '#000000' };
+                if (bgIdx !== -1) updatedGenome[bgIdx] = newBgTrait;
+                else updatedGenome.push(newBgTrait);
+            }
+
+            // I. Persist Virus Evolution State
             const updatedVirus = await tx.virus.update({
                 where: { id: user.virus.id },
                 data: {
                     mutations: { increment: 1 },
+                    level: newLevel,
+                    progress: newProgress,
                     synergyScore: synergyScore,
                     genome: updatedGenome
                 }
             });
 
-            // G. Log Transaction
+            // J. Log Transaction
             await tx.transaction.create({
                 data: {
                     userId: user.id,
@@ -146,17 +193,22 @@ export async function POST(req: NextRequest) {
                 }
             });
 
-            return { user: updatedUser, virus: updatedVirus, pointsEarned, goldEarned, rarity, chosenBg, synergyScore };
+            return { user: updatedUser, virus: updatedVirus, pointsEarned, goldEarned, rarity, chosenBg, synergyScore, newLevel, newProgress, didLevelUp, genome: updatedGenome };
         });
 
         return NextResponse.json({
             success: true,
             data: {
-                approvedTrait: { layerId: 'background_layer', traitId: result.chosenBg, name: `${result.chosenBg.split('_')[1].toUpperCase()} Environment`, rarity: result.rarity },
+                approvedTrait: { layerId: 'background_layer', traitId: result.chosenBg, name: `${result.chosenBg.split('_').slice(1).join(' ').toUpperCase()} Environment`, rarity: result.rarity },
                 newSynergyScore: result.synergyScore,
                 pointsEarned: result.pointsEarned,
                 goldEarned: result.goldEarned,
                 energyRemaining: result.user.energy,
+                // NEW: Server-Authoritative Evolution Data
+                newLevel: result.newLevel,
+                newProgress: result.newProgress,
+                didLevelUp: result.didLevelUp,
+                genome: result.genome,
                 adState: {
                     dailyAdsWatched: result.user.dailyAdsWatched,
                     lastAdWatchTime: result.user.lastAdWatchTime?.toISOString(),

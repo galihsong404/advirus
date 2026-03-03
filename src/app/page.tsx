@@ -101,15 +101,22 @@ export default function Home() {
 
       try {
         const response = await fetch('/api/v1/auth/sync', {
+          method: 'POST',
           headers: { 'X-TG-Init-Data': initData }
         });
+
+        if (!response.ok) {
+          console.warn(`Hydration failed with status ${response.status}`);
+          return;
+        }
+
         const result = await response.json();
         if (result.success) {
           syncState(result.data);
           console.log("MMO State Hydrated from DB");
         }
       } catch (e) {
-        console.error("Hydration failed", e);
+        console.error("Hydration network error", e);
       }
     };
 
@@ -182,11 +189,11 @@ export default function Home() {
       const result = await response.json();
 
       if (result.success) {
-        // P0-01 FIX: Server now handles energy, but we update client for UX
+        // SERVER-AUTHORITATIVE: Pass entire response to store
         const prevLevel = level;
-        mutate(result.data.approvedTrait, result.data.pointsEarned, result.data.goldEarned, result.data.newSynergyScore);
+        mutate(result.data);
 
-        if (useGameStore.getState().level > prevLevel) {
+        if ((result.data.newLevel ?? level) > prevLevel) {
           setIsLevelingUp(true);
         }
 

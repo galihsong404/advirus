@@ -7,6 +7,18 @@ interface Trait {
     hex: string;
 }
 
+interface MutationServerResponse {
+    approvedTrait?: Partial<Trait>;
+    newSynergyScore?: number;
+    pointsEarned?: number;
+    goldEarned?: number;
+    energyRemaining?: number;
+    newLevel?: number;
+    newProgress?: number;
+    didLevelUp?: boolean;
+    genome?: Trait[];
+}
+
 interface GameState {
     points: number;
     gold: number;
@@ -37,7 +49,7 @@ interface GameState {
     buyEnergyWithGold: (amount: number, cost: number) => boolean;
     calculateEnergyRefill: () => void;
     refillEnergy: () => void;
-    mutate: (trait: Partial<Trait>, pointsEarned: number, goldEarned: number, synergy: number) => void;
+    mutate: (serverData: MutationServerResponse) => void;
     syncState: (data: any) => void;
     checkStreak: () => void;
     buyOfflineCard: (cardId: string, cost: number, rateIncrease: number) => boolean;
@@ -194,49 +206,12 @@ export const useGameStore = create<GameState>()(
                 return earnedPoints;
             },
 
-            mutate: (trait, pointsEarned, goldEarned, synergy) => set((state) => {
-                const newGenome = [...state.genome];
-                let newProgress = Math.round((state.progress + 11.11) * 100) / 100;
-                let newLevel = state.level;
-
-                const newAdsWatched = state.dailyAdsWatched + 1;
-
-                if (newProgress >= 100) {
-                    if (newAdsWatched >= 15) {
-                        newLevel = state.level + 1;
-                        newProgress = 0;
-
-                        if (newLevel <= 10) {
-                            const spriteIndex = newGenome.findIndex(t => t.layerId === 'master_sprite');
-                            const newSprite = {
-                                layerId: 'master_sprite',
-                                traitId: `monster_lvl${newLevel}_v1`,
-                                hex: trait.hex || (spriteIndex !== -1 ? newGenome[spriteIndex].hex : '#00ffcc')
-                            };
-
-                            if (spriteIndex !== -1) {
-                                newGenome[spriteIndex] = newSprite;
-                            } else {
-                                newGenome.push(newSprite);
-                            }
-                        }
-                    } else {
-                        newProgress = 99.9;
-                    }
-                }
-
-                if (trait.layerId) {
-                    const existingIndex = newGenome.findIndex(t => t.layerId === trait.layerId);
-                    if (existingIndex !== -1) {
-                        newGenome[existingIndex] = { ...newGenome[existingIndex], ...trait } as Trait;
-                    } else {
-                        newGenome.push(trait as Trait);
-                    }
-                }
-
+            mutate: (serverData) => set((state) => {
+                // SERVER-AUTHORITATIVE: Client no longer calculates level-up or progress.
+                // It simply mirrors whatever the server returned.
                 const newCombo = [...state.dailyCombo];
-                if (trait.traitId && !state.dailyComboClaimed && !newCombo.includes(trait.traitId)) {
-                    newCombo.push(trait.traitId);
+                if (serverData.approvedTrait?.traitId && !state.dailyComboClaimed && !newCombo.includes(serverData.approvedTrait.traitId)) {
+                    newCombo.push(serverData.approvedTrait.traitId);
                 }
 
                 let comboBonus = 0;
@@ -247,18 +222,22 @@ export const useGameStore = create<GameState>()(
                 }
 
                 return {
-                    genome: newGenome,
+                    // Server-authoritative fields
+                    genome: serverData.genome || state.genome,
+                    level: Math.min(serverData.newLevel ?? state.level, 10),
+                    progress: serverData.newProgress ?? state.progress,
+                    synergyScore: serverData.newSynergyScore ?? state.synergyScore,
+                    highestLevelReached: Math.max(serverData.newLevel ?? 0, state.highestLevelReached),
+                    // Accumulated fields
                     mutations: state.mutations + 1,
-                    dailyAdsWatched: newAdsWatched,
+                    dailyAdsWatched: state.dailyAdsWatched + 1,
                     lastAdWatchTime: Date.now(),
-                    progress: newProgress,
-                    level: Math.min(newLevel, 10),
-                    highestLevelReached: Math.max(state.highestLevelReached || 0, Math.min(newLevel, 10)),
-                    points: state.points + pointsEarned + comboBonus,
-                    gold: state.gold + goldEarned,
-                    synergyScore: synergy,
+                    points: state.points + (serverData.pointsEarned || 0) + comboBonus,
+                    gold: state.gold + (serverData.goldEarned || 0),
+                    energy: serverData.energyRemaining ?? (state.energy - 1),
+                    // Combo
                     dailyCombo: newCombo,
-                    dailyComboClaimed: comboClaimed
+                    dailyComboClaimed: comboClaimed,
                 };
             }),
 
