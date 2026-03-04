@@ -158,12 +158,27 @@ export async function POST(req: NextRequest) {
                 7: 'bg_zen_bridge',
                 8: 'bg_deep_sea',
                 9: 'bg_float_island',
-                10: 'bg_solar_flare'
+                10: 'bg_solar_flare',
+                11: 'bg_obsidian_monolith',
+                12: 'bg_aurora_portal',
+                13: 'bg_crystal_cave',
+                14: 'bg_neon_forest',
+                15: 'bg_storm_clouds',
+                16: 'bg_clockwork_void',
+                17: 'bg_toxic_marsh',
+                18: 'bg_cyber_graveyard',
+                19: 'bg_data_cathedral',
+                20: 'bg_glitch_desert',
+                21: 'bg_circuit_city',
+                22: 'bg_virtual_library',
+                23: 'bg_space_hub'
             };
 
-            let chosenBg = levelBackgroundMap[currentLevel] || 'bg_digital_void'; // current bg
+            const ALL_BGS = Object.values(levelBackgroundMap);
+            let chosenBg = levelBackgroundMap[currentLevel] || ALL_BGS[currentLevel % ALL_BGS.length];
+
             if (didLevelUp) {
-                chosenBg = levelBackgroundMap[newLevel] || 'bg_solar_flare';
+                chosenBg = levelBackgroundMap[newLevel] || ALL_BGS[newLevel % ALL_BGS.length];
                 const bgIdx = updatedGenome.findIndex((t: any) => t.layerId === 'background_layer');
                 const newBgTrait = { layerId: 'background_layer', traitId: chosenBg, hex: '#000000' };
                 if (bgIdx !== -1) updatedGenome[bgIdx] = newBgTrait;
