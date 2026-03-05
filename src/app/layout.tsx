@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
-import Head from 'next/head';
+import Script from 'next/script';
 import './globals.css';
 
 export default function RootLayout({
@@ -27,9 +27,10 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <Head>
-        <script src="https://telegram.org/js/telegram-web-app.js" async />
-      </Head>
+      <head>
+        {/* P1-05 FIX: Use next/script instead of next/head (unsupported in App Router) */}
+        <Script src="https://telegram.org/js/telegram-web-app.js" strategy="beforeInteractive" />
+      </head>
       <body className="antialiased selection:bg-purple-500/30 selection:text-white">
         {children}
       </body>

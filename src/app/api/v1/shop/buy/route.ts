@@ -1,6 +1,6 @@
 export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
-import { validateTelegramInitData } from '@/lib/telegram';
+import { validateTelegramInitData, parseTelegramInitData } from '@/lib/telegram';
 
 // P0-PRICE FIX: Server-side price catalog — client CANNOT set price or amount
 const SHOP_CATALOG: Record<string, { label: string; amount: number; priceStars: number }> = {
@@ -51,13 +51,17 @@ export async function POST(req: NextRequest) {
         const catalogItem = SHOP_CATALOG[itemId];
 
         // Call Telegram Bot API to create an invoice link for Telegram Stars
+        const parsed = parseTelegramInitData(initData);
+        const userId = parsed?.user?.id?.toString() || 'unknown';
+
         const response = await fetch(`https://api.telegram.org/bot${botToken}/createInvoiceLink`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 title: catalogItem.label,
                 description: `Purchase ${catalogItem.label} for your AdVirus Evolution Lab account.`,
-                payload: `purchase_${itemId}_${crypto.randomUUID()}`,
+                // P0-01 FIX: Use JSON payload so webhook can parse userId/itemId/amount
+                payload: JSON.stringify({ userId, itemId, amount: catalogItem.amount }),
                 provider_token: "", // Empty for Telegram Stars
                 currency: "XTR", // Telegram Stars currency code
                 prices: [{ label: catalogItem.label, amount: catalogItem.priceStars }],

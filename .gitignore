@@ -37,3 +37,13 @@ Thumbs.db
 .vercel
 
 /src/generated/prisma
+
+# Logs & Dev Scripts
+*.log
+lint_results*.txt
+clean-env.js
+test-*.js
+remove_bg.py
+process_backgrounds.py
+"background digimon/"
+"variant 1/"

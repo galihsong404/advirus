@@ -27,6 +27,7 @@ interface GameState {
     highestLevelReached: number; // For Collection Gallery
     progress: number;
     synergyScore: number;
+    swarmId: string | null;
     mutations: number;
     lastEnergyUpdate: number;
     currentStreak: number;
@@ -46,14 +47,13 @@ interface GameState {
     addPoints: (amount: number) => void;
     addGold: (amount: number) => void;
     consumeEnergy: () => boolean;
-    buyEnergyWithGold: (amount: number, cost: number) => boolean;
-    calculateEnergyRefill: () => void;
+    buyEnergyWithGold: (initDataStr: string) => Promise<{ success: boolean; costPaid?: number; nextCost?: number; error?: string }>;
     refillEnergy: () => void;
     mutate: (serverData: MutationServerResponse) => void;
     syncState: (data: any) => void;
-    checkStreak: () => void;
+    checkStreak: (initDataStr: string) => Promise<{ bonusPoints: number, bonusGold: number, alreadyClaimed: boolean } | void>;
     buyOfflineCard: (cardId: string, cost: number, rateIncrease: number) => boolean;
-    claimOfflinePoints: () => number; // Returns points earned
+    claimOfflinePoints: () => number;
 }
 
 export const useGameStore = create<GameState>()(
@@ -66,6 +66,7 @@ export const useGameStore = create<GameState>()(
             highestLevelReached: 0,
             progress: 0,
             synergyScore: 1.0,
+            swarmId: null,
             mutations: 0,
             lastEnergyUpdate: Date.now(),
             currentStreak: 1,
@@ -98,78 +99,84 @@ export const useGameStore = create<GameState>()(
                 return false;
             },
 
-            buyEnergyWithGold: (amount, baseCost) => {
-                const state = get();
-                const actualCost = baseCost * Math.pow(2, state.dailyEnergyRefills);
-
-                if (state.gold >= actualCost) {
-                    set({
-                        gold: state.gold - actualCost,
-                        energy: Math.min(10, state.energy + amount),
-                        lastEnergyUpdate: Date.now(),
-                        dailyEnergyRefills: state.dailyEnergyRefills + 1
+            // P1-01 FIX: Server-authoritative energy purchase
+            buyEnergyWithGold: async (initDataStr: string) => {
+                try {
+                    const response = await fetch('/api/v1/game/buy-energy', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-TG-Init-Data': initDataStr
+                        }
                     });
-                    return true;
-                }
-                return false;
-            },
 
-            // P2-ENERGY-DESYNC FIX: Removed local calculateEnergyRefill logic.
-            // Client relies entirely on `/api/v1/auth/sync` and UI will just show the server value.
-            calculateEnergyRefill: () => { },
+                    const result = await response.json();
+                    if (result.success && result.data) {
+                        set({
+                            gold: result.data.gold,
+                            energy: result.data.energy,
+                            dailyEnergyRefills: result.data.dailyEnergyRefills,
+                            lastEnergyUpdate: Date.now()
+                        });
+                        return { success: true, costPaid: result.data.costPaid, nextCost: result.data.nextCost };
+                    }
+                    return { success: false, error: result.error || 'Failed' };
+                } catch (e) {
+                    console.error("Buy energy failed", e);
+                    return { success: false, error: 'Network error' };
+                }
+            },
 
             refillEnergy: () => set({ energy: 10, lastEnergyUpdate: Date.now() }),
 
-            checkStreak: () => {
-                // P0-04 FIX: Read-only check first, then atomic set()
-                const { lastLoginDate, lastStreakClaimDate, currentStreak } = get();
-                const now = new Date();
-                const today = now.toISOString().split('T')[0];
+            checkStreak: async (initDataStr: string) => {
+                const { lastStreakClaimDate } = get();
+                const today = new Date().toISOString().split('T')[0];
 
-                // If already claimed today, do nothing
+                // Optimistic check to avoid unnecessary network request
                 if (lastStreakClaimDate === today) return;
 
-                let newStreak = currentStreak;
+                try {
+                    const response = await fetch('/api/v1/game/claim-streak', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-TG-Init-Data': initDataStr
+                        }
+                    });
 
-                if (lastLoginDate) {
-                    const lastDate = new Date(lastLoginDate);
-                    lastDate.setHours(0, 0, 0, 0);
-                    const todayDate = new Date(now);
-                    todayDate.setHours(0, 0, 0, 0);
+                    if (!response.ok) return;
 
-                    const diffDays = Math.floor((todayDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
+                    const result = await response.json();
+                    if (result.success && result.data) {
+                        const { data } = result;
 
-                    if (diffDays === 1) {
-                        newStreak += 1;
-                    } else if (diffDays > 1) {
-                        newStreak = 1;
+                        // Atomic updater using server-authoritative values
+                        set((state) => ({
+                            currentStreak: data.currentStreak,
+                            lastLoginDate: data.lastLoginDate,
+                            lastStreakClaimDate: data.lastStreakClaimDate,
+                            points: data.points,
+                            gold: data.gold,
+                            // If we claimed successfully (not already claimed), these were reset on server
+                            ...(result.alreadyClaimed ? {} : {
+                                dailyAdsWatched: 0,
+                                dailyEnergyRefills: 0,
+                                dailyCombo: [],
+                                dailyComboClaimed: false
+                            })
+                        }));
+
+                        // Optional: Return the bonus points/gold so the UI can show a celebration
+                        return {
+                            bonusPoints: data.bonusPoints || 0,
+                            bonusGold: data.bonusGold || 0,
+                            alreadyClaimed: result.alreadyClaimed
+                        };
                     }
-                } else {
-                    newStreak = 1;
+                } catch (e) {
+                    console.error("Streak sync failed", e);
                 }
-
-                const streakMultiplier = Math.min(newStreak, 30);
-                let bonusPoints = 100 * streakMultiplier;
-                let bonusGold = 2 * streakMultiplier;
-
-                if (newStreak === 7) { bonusPoints += 5000; bonusGold += 100; }
-                else if (newStreak === 14) { bonusPoints += 15000; bonusGold += 500; }
-                else if (newStreak === 30) { bonusPoints += 50000; bonusGold += 2000; }
-                else if (newStreak === 60) { bonusPoints += 150000; bonusGold += 5000; }
-                else if (newStreak === 90) { bonusPoints += 500000; bonusGold += 15000; }
-
-                // P0-04 FIX: Atomic updater — uses fresh state.points/state.gold
-                set((state) => ({
-                    currentStreak: newStreak,
-                    lastLoginDate: today,
-                    lastStreakClaimDate: today,
-                    points: state.points + bonusPoints,
-                    gold: state.gold + bonusGold,
-                    dailyAdsWatched: 0,
-                    dailyEnergyRefills: 0,
-                    dailyCombo: [],
-                    dailyComboClaimed: false
-                }));
             },
 
             buyOfflineCard: (cardId, cost, rateIncrease) => {
@@ -206,7 +213,7 @@ export const useGameStore = create<GameState>()(
                 return earnedPoints;
             },
 
-            mutate: (serverData) => set((state) => {
+            mutate: (serverData: MutationServerResponse) => set((state) => {
                 // SERVER-AUTHORITATIVE: Client no longer calculates level-up or progress.
                 // It simply mirrors whatever the server returned.
                 const newCombo = [...state.dailyCombo];
@@ -244,6 +251,7 @@ export const useGameStore = create<GameState>()(
             syncState: (data) => set((state) => ({
                 ...state,
                 // Direct scalar mappings
+                swarmId: data.swarmId ?? state.swarmId,
                 points: data.points ?? state.points,
                 gold: data.gold ?? state.gold,
                 energy: data.energy ?? state.energy,

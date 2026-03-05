@@ -31,24 +31,59 @@ export async function POST(req: NextRequest) {
 
         // P0-STATE-LOSS & P1-SYNC-RACE FIX:
         // NEVER trust client for: points, gold, energy, progress, level, genome, synergyScore
-        // Trust only: lastLoginDate, offlineCards (if we track views), highestLevelReached
-        await prisma.user.update({
+        // P1-02 FIX: Don't trust highestLevelReached from client either — use server max
+        const existingUser = await prisma.user.findUnique({ where: { telegramId } });
+        if (!existingUser) {
+            return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
+        }
+
+        const updatedUser = await prisma.user.update({
             where: { telegramId },
             data: {
                 lastLoginDate: clientState.lastLoginDate,
-                highestLevelReached: clientState.highestLevelReached,
-                // Only track the offline claim time to prevent double-claiming if we eventually move that to server
+                // P1-02 FIX: Server enforces max — client can never inflate
+                highestLevelReached: Math.max(
+                    existingUser.highestLevelReached,
+                    typeof clientState.highestLevelReached === 'number' ? clientState.highestLevelReached : 0
+                ),
                 lastOfflineClaim: clientState.lastOfflineClaim ? new Date(clientState.lastOfflineClaim) : undefined
-            }
+            },
+            include: { virus: true }
         });
 
+        // P0-02 FIX: Return full authoritative state so client can sync
         return NextResponse.json({
             success: true,
             timestamp: new Date().toISOString(),
-            serverAcknowledged: true
+            data: {
+                points: updatedUser.points,
+                gold: updatedUser.gold,
+                energy: updatedUser.energy,
+                swarmId: updatedUser.swarmId,
+                lastEnergyUpdate: updatedUser.lastEnergyUpdate.toISOString(),
+                streak: {
+                    current: updatedUser.currentStreak,
+                    lastLogin: updatedUser.lastLoginDate,
+                    lastStreakClaimDate: updatedUser.lastStreakClaimDate
+                },
+                adQuota: {
+                    dailyAdsWatched: updatedUser.dailyAdsWatched,
+                    lastAdWatchTime: updatedUser.lastAdWatchTime?.toISOString() || null,
+                    dailyCap: 50,
+                    cooldownMs: 15 * 60 * 1000
+                },
+                virus: {
+                    level: updatedUser.virus?.level || 0,
+                    progress: updatedUser.virus?.progress || 0,
+                    mutations: updatedUser.virus?.mutations || 0,
+                    synergyScore: updatedUser.virus?.synergyScore || 1.0,
+                    genome: updatedUser.virus?.genome || []
+                }
+            }
         });
 
     } catch (error) {
+        console.error('Sync-State Error:', error);
         return NextResponse.json({ success: false, error: { code: 'ERR_DB_UNAVAILABLE' } }, { status: 500 });
     }
 }

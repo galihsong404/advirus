@@ -62,6 +62,12 @@ model Transaction {
   currency    String   // POINTS, GOLD, STARS
   timestamp   DateTime @default(now())
 
+  // Webhook Integration & External Providers
+  providerId  String?  @unique
+  itemId      String?
+  itemAmount  Int?
+  status      String   @default("COMPLETED")
+
   // P1-TRANSACTION-LEAK FIX: Index for fast adSessionId replay checks
   @@index([userId, context])
 }

@@ -9,8 +9,8 @@ import { triggerMonetagAuction, showRewardedAd, AdSession } from '@/lib/monetag'
 export default function Home() {
   const {
     points, gold, energy, level, progress, synergyScore, genome,
-    consumeEnergy, mutate, calculateEnergyRefill, checkStreak, currentStreak, buyEnergyWithGold,
-    dailyEnergyRefills, dailyCombo, dailyComboClaimed,
+    consumeEnergy, mutate, checkStreak, currentStreak, buyEnergyWithGold,
+    dailyEnergyRefills, dailyCombo, dailyComboClaimed, swarmId,
     offlinePointsRate, offlineCards, buyOfflineCard, claimOfflinePoints,
     // P1-ECONOMY: addGold/refillEnergy removed — rewards must come from server verification
     dailyAdsWatched, lastAdWatchTime, lastEnergyUpdate, // P2-01 FIX: Subscribe to these via hook
@@ -24,6 +24,12 @@ export default function Home() {
   const [showUpgradesModal, setShowUpgradesModal] = useState(false);
   const [auctionSession, setAuctionSession] = useState<AdSession | null>(null);
   const [mutationStep, setMutationStep] = useState<'idle' | 'auction' | 'watching' | 'morphing'>('idle');
+  const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
+  const [isLeaderboardLoading, setIsLeaderboardLoading] = useState(false);
+  const [swarmsData, setSwarmsData] = useState<any[]>([]);
+  const [mySwarmData, setMySwarmData] = useState<any | null>(null);
+  const [isSwarmsLoading, setIsSwarmsLoading] = useState(false);
+  const [newSwarmName, setNewSwarmName] = useState('');
 
   // PHASE 8: 5-Tab Navigation & Splash Screen
   const [bootSequence, setBootSequence] = useState(true);
@@ -56,8 +62,18 @@ export default function Home() {
 
   useEffect(() => {
     // Background loops
-    calculateEnergyRefill();
-    checkStreak();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tg = (window as any).Telegram?.WebApp;
+    const initData = tg?.initData || "";
+
+    if (initData) {
+      checkStreak(initData).then((res) => {
+        if (res && !res.alreadyClaimed && (res.bonusPoints > 0 || res.bonusGold > 0)) {
+          alert(`🔥 Daily Streak Check-in! You earned ${res.bonusPoints} Points and ${res.bonusGold} Gold!`);
+        }
+      });
+    }
 
     // Idle earnings check (runs on mount)
     const earned = claimOfflinePoints();
@@ -65,11 +81,8 @@ export default function Home() {
       alert(`⚡ Welcome Back! Your Idle Network mined ${earned} Points while you were away!`);
     }
 
-    const interval = setInterval(() => {
-      calculateEnergyRefill();
-    }, 60000); // Check every minute
+    // No manual energy calculation loop here; energy syncs from the server periodically via syncState
 
-    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -142,6 +155,153 @@ export default function Home() {
 
     return () => clearInterval(syncInterval);
   }, [syncState]);
+
+  // Fetch Leaderboard when switching to Social tab
+  useEffect(() => {
+    if (currentTab === 'social') {
+      const fetchLeaderboard = async () => {
+        setIsLeaderboardLoading(true);
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const tg = (window as any).Telegram?.WebApp;
+          const initData = tg?.initData || "";
+
+          const res = await fetch('/api/v1/game/leaderboard?sortBy=points&limit=50', {
+            headers: { 'X-TG-Init-Data': initData }
+          });
+          const json = await res.json();
+          if (json.success) {
+            setLeaderboardData(json.data);
+          }
+        } catch (e) {
+          console.error("Failed to fetch leaderboard", e);
+        } finally {
+          setIsLeaderboardLoading(false);
+        }
+      };
+
+      const fetchSwarms = async () => {
+        setIsSwarmsLoading(true);
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const tg = (window as any).Telegram?.WebApp;
+          const initData = tg?.initData || "";
+
+          if (swarmId) {
+            const resMy = await fetch(`/api/v1/game/swarm?swarmId=${swarmId}`, { headers: { 'X-TG-Init-Data': initData } });
+            const jsonMy = await resMy.json();
+            if (jsonMy.success) setMySwarmData(jsonMy.data);
+          }
+
+          const resAll = await fetch('/api/v1/game/swarm', { headers: { 'X-TG-Init-Data': initData } });
+          const jsonAll = await resAll.json();
+          if (jsonAll.success) setSwarmsData(jsonAll.data);
+
+        } catch (e) {
+          console.error("Failed to fetch swarms", e);
+        } finally {
+          setIsSwarmsLoading(false);
+        }
+      };
+
+      fetchLeaderboard();
+      fetchSwarms();
+    }
+  }, [currentTab, swarmId]);
+
+  const handleCreateSwarm = async () => {
+    if (!newSwarmName || newSwarmName.length < 3) return alert("Name too short");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tg = (window as any).Telegram?.WebApp;
+    const initData = tg?.initData || "";
+
+    try {
+      const res = await fetch('/api/v1/game/swarm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': initData },
+        body: JSON.stringify({ name: newSwarmName })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("Swarm Created!");
+        setNewSwarmName('');
+        // We sync again to get updated points/gold/swarmId
+        const syncRes = await fetch('/api/v1/auth/sync-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': initData },
+          body: JSON.stringify({ lastLoginDate: new Date().toISOString().split('T')[0] })
+        });
+        const syncData = await syncRes.json();
+        if (syncData.success) syncState(syncData.data);
+      } else {
+        alert(data.error || "Failed to create Swarm");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleJoinSwarm = async (targetSwarmId: string) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tg = (window as any).Telegram?.WebApp;
+    const initData = tg?.initData || "";
+
+    try {
+      const res = await fetch('/api/v1/game/swarm', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': initData },
+        body: JSON.stringify({ swarmId: targetSwarmId, action: 'join' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("Joined Swarm!");
+        // We sync again to get updated swarmId
+        const syncRes = await fetch('/api/v1/auth/sync-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': initData },
+          body: JSON.stringify({ lastLoginDate: new Date().toISOString().split('T')[0] })
+        });
+        const syncData = await syncRes.json();
+        if (syncData.success) syncState(syncData.data);
+      } else {
+        alert(data.error || "Failed to join Swarm");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleLeaveSwarm = async () => {
+    if (!confirm("Are you sure you want to leave your Swarm?")) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const tg = (window as any).Telegram?.WebApp;
+    const initData = tg?.initData || "";
+
+    try {
+      const res = await fetch('/api/v1/game/swarm', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': initData },
+        body: JSON.stringify({ action: 'leave' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert("Left Swarm!");
+        setMySwarmData(null);
+        // We sync again to get updated swarmId
+        const syncRes = await fetch('/api/v1/auth/sync-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': initData },
+          body: JSON.stringify({ lastLoginDate: new Date().toISOString().split('T')[0] })
+        });
+        const syncData = await syncRes.json();
+        if (syncData.success) syncState(syncData.data);
+      } else {
+        alert(data.error || "Failed to leave Swarm");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const handleMutateClick = async () => {
     // P0-02 FIX: Use ref-based mutex (synchronous check, immune to React batching)
@@ -400,15 +560,17 @@ export default function Home() {
                 </p>
 
                 <button
-                  onClick={() => {
-                    // P1-04 FIX: Read fresh store state for cost calculation
-                    const currentRefills = useGameStore.getState().dailyEnergyRefills;
-                    const cost = 50 * Math.pow(2, currentRefills);
-                    const success = buyEnergyWithGold(10, 50);
-                    if (success) {
+                  onClick={async () => {
+                    // P1-01 FIX: Server-authoritative energy purchase
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    const tg = (window as any).Telegram?.WebApp;
+                    const initData = tg?.initData || "";
+                    const result = await buyEnergyWithGold(initData);
+                    if (result.success) {
                       setShowEnergyModal(false);
+                      alert(`⚡ Energy refilled! Cost: 🟡 ${result.costPaid} Gold. Next refill: 🟡 ${result.nextCost}`);
                     } else {
-                      alert(`Not enough Gold! You need 🟡 ${cost} Gold.`);
+                      alert(result.error || 'Failed to buy energy');
                     }
                   }}
                   className="w-full py-4 rounded-2xl bg-gradient-to-r from-yellow-600 to-yellow-500 text-black font-black text-sm uppercase tracking-widest mb-3 hover:scale-105 transition-transform active:scale-95 shadow-lg shadow-yellow-500/20 tabular-nums"
@@ -815,20 +977,64 @@ export default function Home() {
         </div>
       )}
 
-      {/* =========== TAB: SOCIAL =========== */}
+      {/* =========== TAB: SOCIAL (Leaderboard & Swarms) =========== */}
       {currentTab === 'social' && (
         <div className="flex-1 w-full h-full relative overflow-y-auto pb-24 z-10 p-6 flex flex-col items-center animate-in fade-in zoom-in-95 duration-300">
-          <div className="w-16 h-16 border-2 border-pink-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_20px_rgba(236,72,153,0.4)]">
-            <span className="text-3xl">🌐</span>
+          <div className="w-16 h-16 border-2 border-yellow-500 rounded-full flex items-center justify-center mb-6 shadow-[0_0_20px_rgba(234,179,8,0.4)]">
+            <span className="text-3xl">🏆</span>
           </div>
-          <h2 className="text-3xl font-black italic tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-[#00ffcc] mb-2 uppercase text-center">Outbreak Network</h2>
-          <p className="text-xs text-gray-400 text-center mb-8 uppercase tracking-widest max-w-[250px]">Infect friends and manage Swarm alliances.</p>
+          <h2 className="text-3xl font-black italic tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-yellow-500 to-orange-500 mb-2 uppercase text-center">Global Rankings</h2>
+          <p className="text-xs text-gray-400 text-center mb-8 uppercase tracking-widest max-w-[250px]">Top Digivolution Strains Worldwide</p>
 
           <div className="w-full flex flex-col gap-4">
+
+            {/* LEADERBOARD WIDGET */}
+            <div className="w-full bg-black/60 border border-yellow-500/30 rounded-2xl overflow-hidden flex flex-col shadow-[0_0_15px_rgba(234,179,8,0.1)]">
+              <div className="grid grid-cols-12 gap-2 p-3 bg-yellow-500/10 border-b border-yellow-500/30 text-[9px] font-black tracking-widest uppercase text-yellow-500">
+                <div className="col-span-2 text-center">Rnk</div>
+                <div className="col-span-4 text-left">Player</div>
+                <div className="col-span-2 text-right">Lvl</div>
+                <div className="col-span-4 text-right">Points</div>
+              </div>
+
+              <div className="flex flex-col max-h-[300px] overflow-y-auto custom-scrollbar">
+                {isLeaderboardLoading ? (
+                  <div className="p-8 flex justify-center">
+                    <div className="w-8 h-8 border-2 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                ) : leaderboardData.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-gray-500 font-mono uppercase tracking-widest">
+                    No data accessible
+                  </div>
+                ) : (
+                  leaderboardData.map((player) => (
+                    <div key={player.id} className={`grid grid-cols-12 gap-2 p-3 items-center border-b border-white/5 transition-colors ${player.rank === 1 ? 'bg-yellow-500/20' : 'hover:bg-white/5'}`}>
+                      <div className="col-span-2 text-center">
+                        <span className={`text-sm font-black ${player.rank === 1 ? 'text-yellow-400 drop-shadow-[0_0_5px_rgba(234,179,8,0.8)]' : player.rank === 2 ? 'text-gray-300' : player.rank === 3 ? 'text-orange-400' : 'text-gray-500'}`}>
+                          #{player.rank}
+                        </span>
+                      </div>
+                      <div className="col-span-4 text-left truncate">
+                        <span className={`text-[10px] font-bold ${player.rank <= 3 ? 'text-white' : 'text-gray-400'}`}>
+                          {player.displayName}
+                        </span>
+                      </div>
+                      <div className="col-span-2 text-right">
+                        <span className="text-xs font-black text-[#00ffcc]">{player.level}</span>
+                      </div>
+                      <div className="col-span-4 text-right truncate">
+                        <span className="text-[10px] font-mono text-purple-400">{player.points.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
             {/* Viral Metagame - Referral Button */}
             <button
               onClick={handleInvite}
-              className="w-full relative overflow-hidden group border border-pink-500/50 bg-pink-900/20 rounded-2xl p-4 flex justify-between items-center transition-all hover:bg-pink-900/40 hover:border-pink-400 active:scale-[0.98] shadow-[0_0_15px_rgba(236,72,153,0.1)]"
+              className="w-full relative overflow-hidden group border border-pink-500/50 bg-pink-900/20 rounded-2xl p-4 flex justify-between items-center transition-all hover:bg-pink-900/40 hover:border-pink-400 active:scale-[0.98] shadow-[0_0_15px_rgba(236,72,153,0.1)] mt-2"
             >
               <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(236,72,153,0.1)_50%,transparent_75%)] bg-[length:20px_20px] animate-[slide_1s_linear_infinite]"></div>
               <div className="flex items-center gap-4 relative z-10">
@@ -843,10 +1049,63 @@ export default function Home() {
               </div>
             </button>
 
-            <div className="w-full bg-white/5 border border-white/10 p-4 rounded-xl flex flex-col items-center justify-center h-32 mt-4">
-              <span className="text-4xl mb-2">🚧</span>
-              <p className="font-bold text-gray-500 uppercase tracking-widest text-[10px] text-center">Swarm Alliances<br />Coming in Phase 9</p>
-            </div>
+            {/* SWARM ALLIANCES */}
+            <h2 className="text-xl font-black italic tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500 mt-6 uppercase text-center border-t border-white/10 pt-4">Swarm Alliances</h2>
+
+            {mySwarmData ? (
+              <div className="w-full bg-black/60 border border-red-500/30 rounded-2xl p-4 flex flex-col items-center">
+                <span className="text-4xl mb-2">🔥</span>
+                <h3 className="text-xl font-bold text-red-500 uppercase">{mySwarmData.name}</h3>
+                <p className="text-xs text-gray-400 mb-4">{mySwarmData._count?.members || mySwarmData.members?.length || 0} Members | {Math.floor(mySwarmData.totalSynergy * 100)} Synergy</p>
+                <button onClick={handleLeaveSwarm} className="text-xs text-red-400 uppercase tracking-widest font-bold border border-red-500/30 px-4 py-2 rounded-lg hover:bg-red-500/20">Leave Swarm</button>
+
+                <div className="w-full mt-4 flex flex-col gap-2 max-h-[200px] overflow-y-auto custom-scrollbar border-t border-white/10 pt-2">
+                  {mySwarmData.members?.map((m: any) => (
+                    <div key={m.id} className="flex justify-between items-center p-2 bg-white/5 rounded-lg">
+                      <span className="text-xs font-bold text-white max-w-[120px] truncate">{m.telegramId}</span>
+                      <span className="text-xs font-mono text-[#00ffcc]">Lv.{m.highestLevelReached}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="w-full flex justify-between gap-2">
+                <input
+                  type="text"
+                  placeholder="Swarm Name"
+                  value={newSwarmName}
+                  onChange={(e) => setNewSwarmName(e.target.value)}
+                  className="flex-1 bg-black/50 border border-white/20 rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-red-500"
+                />
+                <button onClick={handleCreateSwarm} className="bg-red-600 text-white font-bold uppercase text-xs px-4 py-2 rounded-xl hover:bg-red-500 shadow-[0_0_10px_rgba(220,38,38,0.4)]">
+                  Create (500G)
+                </button>
+              </div>
+            )}
+
+            {!mySwarmData && (
+              <div className="w-full bg-black/60 border border-white/10 rounded-2xl overflow-hidden mt-4">
+                <div className="grid grid-cols-12 gap-2 p-3 bg-white/5 border-b border-white/10 text-[9px] font-black tracking-widest uppercase text-gray-400">
+                  <div className="col-span-5 text-left">Swarm</div>
+                  <div className="col-span-3 text-center">Members</div>
+                  <div className="col-span-4 text-right">Action</div>
+                </div>
+                <div className="flex flex-col max-h-[200px] overflow-y-auto">
+                  {isSwarmsLoading ? (
+                    <div className="p-4 text-center">Loading...</div>
+                  ) : swarmsData.map((swarm) => (
+                    <div key={swarm.id} className="grid grid-cols-12 gap-2 p-3 items-center border-b border-white/5">
+                      <div className="col-span-5 text-left truncate"><span className="text-[10px] font-bold text-white">{swarm.name}</span></div>
+                      <div className="col-span-3 text-center"><span className="text-xs font-mono text-gray-400">{swarm._count?.members || 0}</span></div>
+                      <div className="col-span-4 text-right">
+                        <button onClick={() => handleJoinSwarm(swarm.id)} className="bg-white/10 hover:bg-white/20 text-white text-[9px] font-bold uppercase px-3 py-1 rounded">Join</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
           </div>
         </div>
       )}

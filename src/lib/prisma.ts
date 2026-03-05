@@ -1,18 +1,22 @@
 import { PrismaClient } from '@prisma/client'
 
-// Use a Proxy to ensure PrismaClient is only instantiated when actually accessed.
-// This prevents Next.js 'Collecting page data' from crashing during build if env vars are missing.
-let _prisma: PrismaClient | undefined;
+// P2-02 FIX: Lazy Proxy + globalThis cache combo.
+// Proxy ensures PrismaClient is only instantiated when actually accessed at runtime
+// (prevents Next.js build/page-data-collection from crashing if DB is unreachable).
+// globalThis cache prevents connection pool exhaustion during dev hot-reload.
+const globalForPrisma = globalThis as unknown as {
+    prisma: PrismaClient | undefined
+};
 
 const prisma = new Proxy({} as PrismaClient, {
-    get(target, prop, receiver) {
-        if (prop === 'then') return undefined; // Prevent issues with async detection
-        if (!_prisma) {
-            _prisma = new PrismaClient();
+    get(_target, prop, receiver) {
+        if (prop === 'then') return undefined;
+        if (!globalForPrisma.prisma) {
+            globalForPrisma.prisma = new PrismaClient();
         }
-        return Reflect.get(_prisma, prop, receiver);
+        return Reflect.get(globalForPrisma.prisma, prop, receiver);
     }
 });
 
 export default prisma;
-export const getPrisma = () => prisma;
+

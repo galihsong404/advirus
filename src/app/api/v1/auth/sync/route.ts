@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
             data: {
                 userId: user.id,
                 telegramId: user.telegramId,
+                swarmId: user.swarmId,
                 points: user.points,
                 gold: user.gold,
                 energy: user.energy,
