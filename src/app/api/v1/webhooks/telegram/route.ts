@@ -30,11 +30,41 @@ export async function POST(req: NextRequest) {
                 return NextResponse.json({ ok: true, pre_checkout_query_id: query.id, ok_status: false, error_message: "Invalid payload format" });
             }
 
-            // Acknowledge the checkout and allow it to proceed
-            // Note: the actual Telegram Bot API requires making a request to `answerPreCheckoutQuery`
-            // But if this is a TMA webhook directly managed by the bot framework, we just return 200 OK.
-            // Normally we'd use node-telegram-bot-api to answer this. For Next.js raw route:
+            // BUG-06 FIX: Validate payload before approving checkout
+            const VALID_ITEMS = ['Gold', 'Energy'];
+            if (!payloadData?.itemId || !VALID_ITEMS.includes(payloadData.itemId)) {
+                const botTokenReject = process.env.TELEGRAM_BOT_TOKEN;
+                if (botTokenReject) {
+                    await fetch(`https://api.telegram.org/bot${botTokenReject}/answerPreCheckoutQuery`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            pre_checkout_query_id: query.id,
+                            ok: false,
+                            error_message: 'Invalid item in invoice.'
+                        })
+                    });
+                }
+                return NextResponse.json({ success: false, message: 'Invalid item rejected' });
+            }
 
+            if (!payloadData.amount || payloadData.amount <= 0) {
+                const botTokenReject2 = process.env.TELEGRAM_BOT_TOKEN;
+                if (botTokenReject2) {
+                    await fetch(`https://api.telegram.org/bot${botTokenReject2}/answerPreCheckoutQuery`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            pre_checkout_query_id: query.id,
+                            ok: false,
+                            error_message: 'Invalid amount.'
+                        })
+                    });
+                }
+                return NextResponse.json({ success: false, message: 'Invalid amount rejected' });
+            }
+
+            // Acknowledge the checkout and allow it to proceed
             const botToken = process.env.TELEGRAM_BOT_TOKEN;
             if (botToken) {
                 await fetch(`https://api.telegram.org/bot${botToken}/answerPreCheckoutQuery`, {

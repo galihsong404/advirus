@@ -3,12 +3,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { validateTelegramInitData, parseTelegramInitData } from '@/lib/telegram';
 import prisma from '@/lib/prisma';
 
-// Catalog of available offline upgrades
+// LOGIC-03 FIX: Rebalanced — cheaper cards have better ROI to reward early investment
 export const OFFLINE_CARDS: Record<string, { name: string, cost: number, rateIncrease: number, description: string }> = {
-    'card_basic_mining': { name: 'Basic Mining Rig', cost: 1000, rateIncrease: 50, description: '+50 points/hour' },
-    'card_advanced_ai': { name: 'Advanced AI Trader', cost: 5000, rateIncrease: 300, description: '+300 points/hour' },
-    'card_quantum_processor': { name: 'Quantum Processor', cost: 25000, rateIncrease: 2000, description: '+2k points/hour' },
-    'card_dark_matter': { name: 'Dark Matter Harvester', cost: 100000, rateIncrease: 10000, description: '+10k points/hour' },
+    'card_basic_mining': { name: 'Basic Mining Rig', cost: 500, rateIncrease: 100, description: '+100 pts/hr (5h payback)' },
+    'card_advanced_ai': { name: 'Advanced AI Trader', cost: 5000, rateIncrease: 500, description: '+500 pts/hr (10h payback)' },
+    'card_quantum_processor': { name: 'Quantum Processor', cost: 30000, rateIncrease: 2000, description: '+2k pts/hr (15h payback)' },
+    'card_dark_matter': { name: 'Dark Matter Harvester', cost: 150000, rateIncrease: 5000, description: '+5k pts/hr (30h payback)' },
 };
 
 export async function POST(req: NextRequest) {

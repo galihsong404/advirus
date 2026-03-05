@@ -81,7 +81,12 @@ export async function POST(req: NextRequest) {
                     mutations: updatedUser.virus?.mutations || 0,
                     synergyScore: updatedUser.virus?.synergyScore || 1.0,
                     genome: updatedUser.virus?.genome || []
-                }
+                },
+                // BUG-05 FIX: Include offline and progression fields
+                offlineCards: updatedUser.offlineCards || [],
+                offlinePointsRate: updatedUser.offlinePointsRate || 0,
+                highestLevelReached: updatedUser.highestLevelReached || 0,
+                dailyEnergyRefills: updatedUser.dailyEnergyRefills || 0
             }
         });
 

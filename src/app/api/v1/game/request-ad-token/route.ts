@@ -10,7 +10,8 @@ import CryptoJS from 'crypto-js';
  * Tokens expire after 5 minutes, preventing hoarding and unauthorized mutation calls.
  */
 
-const AD_TOKEN_SECRET = process.env.TELEGRAM_BOT_TOKEN || 'fallback-ad-secret';
+// BUG-07 FIX: Derive ad token secret from bot token via HMAC, not reuse it directly
+const AD_TOKEN_SECRET = CryptoJS.HmacSHA256('advirus-ad-token-secret', process.env.TELEGRAM_BOT_TOKEN || 'fallback').toString();
 const AD_TOKEN_EXPIRY_MS = 5 * 60 * 1000; // 5 minutes
 
 export async function GET(req: NextRequest) {

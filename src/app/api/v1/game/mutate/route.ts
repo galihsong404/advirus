@@ -4,7 +4,7 @@ import { validateTelegramInitData, parseTelegramInitData } from '@/lib/telegram'
 import prisma from '@/lib/prisma';
 import { verifyAdToken } from '@/app/api/v1/game/request-ad-token/route';
 
-const COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+const COOLDOWN_MS = 30 * 1000; // 30 seconds (BUG-02 FIX: was 15 min, killed engagement)
 const DAILY_AD_CAP = 50;
 const ENERGY_MAX = 10;
 const ENERGY_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours
@@ -72,9 +72,11 @@ export async function POST(req: NextRequest) {
             const now = new Date();
             const today = now.toISOString().split('T')[0];
 
-            // Reset daily ads if it's a new day
+            // BUG-03 FIX: Reset daily counters based on lastStreakClaimDate, not lastLoginDate
+            // This ensures reset happens even if streak was already claimed at boot
             let dailyAdsWatched = user.dailyAdsWatched;
-            if (user.lastLoginDate !== today) {
+            const lastClaimDay = user.lastStreakClaimDate || '';
+            if (lastClaimDay !== today && user.lastLoginDate !== today) {
                 dailyAdsWatched = 0;
             }
 
@@ -127,7 +129,8 @@ export async function POST(req: NextRequest) {
             let newLevel = currentLevel;
             let didLevelUp = false;
 
-            if (newProgress >= 100 && newLevel < 10) {
+            // BUG-01 FIX: Level cap raised from 10 → 50
+            if (newProgress >= 100 && newLevel < 50) {
                 newLevel = currentLevel + 1;
                 newProgress = 0;
                 didLevelUp = true;

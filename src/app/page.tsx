@@ -995,10 +995,10 @@ export default function Home() {
 
           <div className="grid grid-cols-1 gap-4">
             {[
-              { id: 'card_basic_mining', name: 'Basic Mining Rig', cost: 1000, rateIncrease: 50, icon: '🖥️' },
-              { id: 'card_advanced_ai', name: 'Advanced AI Trader', cost: 5000, rateIncrease: 300, icon: '🧠' },
-              { id: 'card_quantum_processor', name: 'Quantum Processor', cost: 25000, rateIncrease: 2000, icon: '⚛️' },
-              { id: 'card_dark_matter', name: 'Dark Matter Harvester', cost: 100000, rateIncrease: 10000, icon: '🌌' }
+              { id: 'card_basic_mining', name: 'Basic Mining Rig', cost: 500, rateIncrease: 100, icon: '🖥️' },
+              { id: 'card_advanced_ai', name: 'Advanced AI Trader', cost: 5000, rateIncrease: 500, icon: '🧠' },
+              { id: 'card_quantum_processor', name: 'Quantum Processor', cost: 30000, rateIncrease: 2000, icon: '⚛️' },
+              { id: 'card_dark_matter', name: 'Dark Matter Harvester', cost: 150000, rateIncrease: 5000, icon: '🌌' }
             ].map(card => {
               const owned = offlineCards.includes(card.id);
               const affordable = points >= card.cost;

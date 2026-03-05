@@ -90,14 +90,11 @@ export const useGameStore = create<GameState>()(
             addPoints: (amount) => set((state) => ({ points: state.points + amount })),
             addGold: (amount) => set((state) => ({ gold: state.gold + amount })),
 
+            // LOGIC-04 FIX: No longer optimistically consume energy client-side.
+            // Energy is ONLY updated from server response to prevent desync.
             consumeEnergy: () => {
                 const { energy } = get();
-                if (energy > 0) {
-                    // P0-01 & P2-ENERGY-DESYNC FIX: Optimistic UI update only. Server handles real decrement.
-                    set((state) => ({ energy: state.energy - 1 }));
-                    return true;
-                }
-                return false;
+                return energy > 0; // Just a check, no mutation
             },
 
             // P1-01 FIX: Server-authoritative energy purchase
@@ -229,35 +226,31 @@ export const useGameStore = create<GameState>()(
             },
 
             mutate: (serverData: MutationServerResponse) => set((state) => {
-                // SERVER-AUTHORITATIVE: Client no longer calculates level-up or progress.
-                // It simply mirrors whatever the server returned.
+                // BUG-04 FIX: Use ONLY server-authoritative values for points/gold/energy.
+                // Previously client was ADDING pointsEarned on top of server increment → 2x rewards.
                 const newCombo = [...state.dailyCombo];
                 if (serverData.approvedTrait?.traitId && !state.dailyComboClaimed && !newCombo.includes(serverData.approvedTrait.traitId)) {
                     newCombo.push(serverData.approvedTrait.traitId);
                 }
 
-                let comboBonus = 0;
                 let comboClaimed = state.dailyComboClaimed;
                 if (!comboClaimed && newCombo.length >= 3) {
-                    comboBonus = 500;
                     comboClaimed = true;
                 }
 
                 return {
-                    // Server-authoritative fields
+                    // Server-authoritative fields — DO NOT increment locally
                     genome: serverData.genome || state.genome,
-                    level: Math.min(serverData.newLevel ?? state.level, 10),
+                    level: serverData.newLevel ?? state.level, // BUG-01 FIX: removed Math.min(..., 10) clamp
                     progress: serverData.newProgress ?? state.progress,
                     synergyScore: serverData.newSynergyScore ?? state.synergyScore,
                     highestLevelReached: Math.max(serverData.newLevel ?? 0, state.highestLevelReached),
-                    // Accumulated fields
+                    // LOGIC-04 FIX: energy comes from server response only
+                    energy: serverData.energyRemaining ?? state.energy,
+                    // Server already incremented these in DB, client mirrors via next sync
                     mutations: state.mutations + 1,
-                    dailyAdsWatched: state.dailyAdsWatched + 1,
                     lastAdWatchTime: Date.now(),
-                    points: state.points + (serverData.pointsEarned || 0) + comboBonus,
-                    gold: state.gold + (serverData.goldEarned || 0),
-                    energy: serverData.energyRemaining ?? (state.energy - 1),
-                    // Combo
+                    // Combo (client-side tracking, harmless)
                     dailyCombo: newCombo,
                     dailyComboClaimed: comboClaimed,
                 };
@@ -286,7 +279,11 @@ export const useGameStore = create<GameState>()(
                 // Timestamps
                 lastEnergyUpdate: data.lastEnergyUpdate ? new Date(data.lastEnergyUpdate).getTime() : state.lastEnergyUpdate,
                 lastOfflineClaim: data.lastOfflineClaim ? new Date(data.lastOfflineClaim).getTime() : state.lastOfflineClaim,
-                highestLevelReached: Math.max(data.virus?.level ?? 0, state.highestLevelReached),
+                // BUG-05 FIX: Restore offline and progression fields from server
+                offlineCards: data.offlineCards ?? state.offlineCards,
+                offlinePointsRate: data.offlinePointsRate ?? state.offlinePointsRate,
+                highestLevelReached: Math.max(data.highestLevelReached ?? 0, data.virus?.level ?? 0, state.highestLevelReached),
+                dailyEnergyRefills: data.dailyEnergyRefills ?? state.dailyEnergyRefills,
             })),
         }),
         {
