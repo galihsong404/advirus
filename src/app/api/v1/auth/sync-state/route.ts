@@ -29,9 +29,10 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ success: false, error: 'Invalid user' }, { status: 400 });
         }
 
-        // P0-STATE-LOSS & P1-SYNC-RACE FIX:
-        // NEVER trust client for: points, gold, energy, progress, level, genome, synergyScore
-        // P1-02 FIX: Don't trust highestLevelReached from client either — use server max
+        // ANTI-CHEAT FIX #2: "Time Traveler" Prevention
+        // ZERO TRUST: Server NEVER accepts time-related fields from client.
+        // lastLoginDate is set by /sync (boot) and /claim-streak only.
+        // lastOfflineClaim is set by /claim-offline only.
         const existingUser = await prisma.user.findUnique({ where: { telegramId } });
         if (!existingUser) {
             return NextResponse.json({ success: false, error: 'User not found' }, { status: 404 });
@@ -40,13 +41,15 @@ export async function POST(req: NextRequest) {
         const updatedUser = await prisma.user.update({
             where: { telegramId },
             data: {
-                lastLoginDate: clientState.lastLoginDate,
-                // P1-02 FIX: Server enforces max — client can never inflate
+                // Only accept highestLevelReached, clamped by server max
                 highestLevelReached: Math.max(
                     existingUser.highestLevelReached,
                     typeof clientState.highestLevelReached === 'number' ? clientState.highestLevelReached : 0
                 ),
-                lastOfflineClaim: clientState.lastOfflineClaim ? new Date(clientState.lastOfflineClaim) : undefined
+                // ALL time fields are server-controlled only:
+                // lastLoginDate — set by /sync and /claim-streak
+                // lastOfflineClaim — set by /claim-offline
+                // lastEnergyUpdate — set by /mutate and /buy-energy
             },
             include: { virus: true }
         });

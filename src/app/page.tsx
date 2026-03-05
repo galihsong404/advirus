@@ -335,15 +335,35 @@ export default function Home() {
 
       // P0-01 FIX: Energy is now consumed AFTER server confirmation, not before
 
+      // ANTI-CHEAT FIX #3: Request server-signed ad token before mutation
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tgMutate = (window as any).Telegram?.WebApp;
+      const initDataMutate = tgMutate?.initData || '';
+
+      let adToken = null;
+      try {
+        const tokenRes = await fetch('/api/v1/game/request-ad-token', {
+          headers: { 'X-TG-Init-Data': initDataMutate }
+        });
+        const tokenData = await tokenRes.json();
+        if (tokenData.success) {
+          adToken = tokenData.data.adToken;
+        }
+      } catch (e) {
+        console.warn("Ad token request failed, falling back to session ID", e);
+      }
+
       const response = await fetch('/api/v1/game/mutate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          'X-TG-Init-Data': (window as any).Telegram?.WebApp?.initData || '',
+          'X-TG-Init-Data': initDataMutate,
           'X-Idempotency-Key': crypto.randomUUID(),
         },
-        body: JSON.stringify({ adSessionId: session.sessionId })
+        body: JSON.stringify({
+          adSessionId: session.sessionId,
+          adToken: adToken
+        })
       });
 
       const result = await response.json();

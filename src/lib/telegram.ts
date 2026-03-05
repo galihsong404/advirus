@@ -13,6 +13,19 @@ export function validateTelegramInitData(initData: string, botToken: string): bo
   const hash = urlParams.get('hash');
   urlParams.delete('hash');
 
+  // ANTI-CHEAT FIX #1: "Forever Token" Prevention
+  // Reject tokens older than 24 hours to block bot scripts using stolen initData
+  const authDateStr = urlParams.get('auth_date');
+  if (authDateStr) {
+    const authDateSec = parseInt(authDateStr, 10);
+    const nowSec = Math.floor(Date.now() / 1000);
+    const MAX_AGE_SEC = 86400; // 24 hours
+    if (isNaN(authDateSec) || (nowSec - authDateSec) > MAX_AGE_SEC) {
+      console.warn(`Token expired: auth_date=${authDateSec}, now=${nowSec}, age=${nowSec - authDateSec}s`);
+      return false;
+    }
+  }
+
   // Sort keys alphabetically
   const keys = Array.from(urlParams.keys()).sort();
   const dataCheckString = keys

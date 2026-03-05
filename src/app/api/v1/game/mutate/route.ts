@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { validateTelegramInitData, parseTelegramInitData } from '@/lib/telegram';
 import prisma from '@/lib/prisma';
+import { verifyAdToken } from '@/app/api/v1/game/request-ad-token/route';
 
 const COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
 const DAILY_AD_CAP = 50;
@@ -28,7 +29,7 @@ export async function POST(req: NextRequest) {
         }
         const telegramId = userData.user.id.toString();
 
-        const { adSessionId } = await req.json();
+        const { adSessionId, adToken } = await req.json();
 
         // 2. Authoritative Database Transaction
         const result = await prisma.$transaction(async (tx: any) => {
@@ -42,13 +43,29 @@ export async function POST(req: NextRequest) {
                 throw new Error('USER_NOT_FOUND');
             }
 
-            // B. Security: Ad Session Burn (CVE-AV-006)
-            // Note: In Phase 9, we check if a transaction with this payload already exists
-            const existingTx = await tx.transaction.findFirst({
-                where: { context: `MUTATION_${adSessionId}` }
-            });
-            if (existingTx) {
-                throw new Error('ERR_AD_SESSION_EXPIRED');
+            // B. ANTI-CHEAT FIX #3: Verify server-signed ad token ("Phantom Ad" Prevention)
+            // If adToken is provided, verify it cryptographically. Otherwise fall back to UUID dupe check.
+            if (adToken) {
+                if (!verifyAdToken(adToken, telegramId)) {
+                    throw new Error('ERR_AD_TOKEN_INVALID');
+                }
+                // Also check if this exact token was already used
+                const existingTx = await tx.transaction.findFirst({
+                    where: { context: `MUTATION_${adToken}` }
+                });
+                if (existingTx) {
+                    throw new Error('ERR_AD_SESSION_EXPIRED');
+                }
+            } else if (adSessionId) {
+                // Legacy fallback: UUID-based dupe check
+                const existingTx = await tx.transaction.findFirst({
+                    where: { context: `MUTATION_${adSessionId}` }
+                });
+                if (existingTx) {
+                    throw new Error('ERR_AD_SESSION_EXPIRED');
+                }
+            } else {
+                throw new Error('ERR_AD_TOKEN_MISSING');
             }
 
             // C. Rate Limiting: Daily Cap & Cooldown
@@ -197,12 +214,12 @@ export async function POST(req: NextRequest) {
                 }
             });
 
-            // J. Log Transaction
+            // J. Log Transaction (use adToken if available, else adSessionId)
             await tx.transaction.create({
                 data: {
                     userId: user.id,
                     type: 'EARN',
-                    context: `MUTATION_${adSessionId}`,
+                    context: `MUTATION_${adToken || adSessionId}`,
                     amount: pointsEarned,
                     currency: 'POINTS'
                 }
@@ -238,6 +255,8 @@ export async function POST(req: NextRequest) {
 
         const errorMap: Record<string, { code: string; message: string; status: number }> = {
             'ERR_AD_SESSION_EXPIRED': { code: 'ERR_AD_SESSION_EXPIRED', message: 'This ad session has already been used.', status: 409 },
+            'ERR_AD_TOKEN_INVALID': { code: 'ERR_AD_TOKEN_INVALID', message: 'Invalid or expired ad token. Request a new one.', status: 403 },
+            'ERR_AD_TOKEN_MISSING': { code: 'ERR_AD_TOKEN_MISSING', message: 'Ad token or session ID required.', status: 400 },
             'ERR_DAILY_AD_CAP': { code: 'ERR_DAILY_AD_CAP', message: `Daily ad limit reached (${DAILY_AD_CAP}).`, status: 429 },
             'ERR_AD_COOLDOWN': { code: 'ERR_AD_COOLDOWN', message: 'Cooldown active. Please wait.', status: 429 },
             'ERR_ENERGY_DEPLETED': { code: 'ERR_ENERGY_DEPLETED', message: 'Molecular Energy depleted.', status: 403 },
