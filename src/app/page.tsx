@@ -11,7 +11,7 @@ export default function Home() {
     points, gold, energy, level, progress, synergyScore, genome,
     consumeEnergy, mutate, checkStreak, currentStreak, buyEnergyWithGold,
     dailyEnergyRefills, dailyCombo, dailyComboClaimed, swarmId,
-    offlinePointsRate, offlineCards, buyOfflineCard, claimOfflinePoints,
+    offlinePointsRate, offlineCards, buyOfflineCardServer, claimOfflinePoints,
     // P1-ECONOMY: addGold/refillEnergy removed — rewards must come from server verification
     dailyAdsWatched, lastAdWatchTime, lastEnergyUpdate, // P2-01 FIX: Subscribe to these via hook
     highestLevelReached, // P2-GETSTATE FIX: Subscribe via hook for Collection Gallery
@@ -21,7 +21,7 @@ export default function Home() {
   const [isMutating, setIsMutating] = useState(false);
   const isMutatingRef = useRef(false); // P0-02 FIX: Sync mutex ref prevents double-click race
   const [isLevelingUp, setIsLevelingUp] = useState(false);
-  const [showUpgradesModal, setShowUpgradesModal] = useState(false);
+  const [showEnergyModal, setShowEnergyModal] = useState(false);
   const [auctionSession, setAuctionSession] = useState<AdSession | null>(null);
   const [mutationStep, setMutationStep] = useState<'idle' | 'auction' | 'watching' | 'morphing'>('idle');
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
@@ -30,6 +30,9 @@ export default function Home() {
   const [mySwarmData, setMySwarmData] = useState<any | null>(null);
   const [isSwarmsLoading, setIsSwarmsLoading] = useState(false);
   const [newSwarmName, setNewSwarmName] = useState('');
+
+  // Offline earnings pop-up state
+  const [offlineEarned, setOfflineEarned] = useState(0);
 
   // PHASE 8: 5-Tab Navigation & Splash Screen
   const [bootSequence, setBootSequence] = useState(true);
@@ -68,25 +71,30 @@ export default function Home() {
     const initData = tg?.initData || "";
 
     if (initData) {
-      checkStreak(initData).then((res) => {
-        if (res && !res.alreadyClaimed && (res.bonusPoints > 0 || res.bonusGold > 0)) {
-          alert(`🔥 Daily Streak Check-in! You earned ${res.bonusPoints} Points and ${res.bonusGold} Gold!`);
-        }
-      });
-    }
+      // Try claiming streak and offline earnings on initial load
+      const runInitialChecks = async () => {
+        try {
+          const streakRes = await checkStreak(initData);
+          if (streakRes && (streakRes.bonusPoints > 0 || streakRes.bonusGold > 0)) {
+            alert(`🔥 Dailies Claimed: +${streakRes.bonusPoints} PTS | 🟡 +${streakRes.bonusGold} Gold`);
+          }
 
-    // Idle earnings check (runs on mount)
-    const earned = claimOfflinePoints();
-    if (earned > 0) {
-      alert(`⚡ Welcome Back! Your Idle Network mined ${earned} Points while you were away!`);
+          // Anti-Cheat: Claim offline points via server endpoint
+          const earnedOffline = await claimOfflinePoints(initData);
+          if (earnedOffline > 0) {
+            setOfflineEarned(earnedOffline);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+      runInitialChecks();
     }
 
     // No manual energy calculation loop here; energy syncs from the server periodically via syncState
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const [showEnergyModal, setShowEnergyModal] = useState(false);
 
   const handleInvite = () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -496,7 +504,7 @@ export default function Home() {
                 🟡 {gold.toLocaleString()}
               </p>
             </div>
-            <div className="text-right px-3 py-1.5 bg-purple-400/10 border border-purple-400/20 rounded-xl cursor-pointer hover:bg-purple-400/20 active:scale-95 transition-all shadow-[0_0_10px_rgba(168,85,247,0.1)]" onClick={() => setShowUpgradesModal(true)}>
+            <div className="text-right px-3 py-1.5 bg-purple-400/10 border border-purple-400/20 rounded-xl cursor-pointer hover:bg-purple-400/20 active:scale-95 transition-all shadow-[0_0_10px_rgba(168,85,247,0.1)]" onClick={() => setCurrentTab('lab')}>
               <p className="text-[8px] text-purple-400 uppercase font-black tracking-widest flex justify-between items-center gap-2">
                 <span>Points</span>
                 <span className="text-[7px] bg-purple-500/50 text-white px-1 rounded-sm">SHOP</span>
@@ -600,9 +608,30 @@ export default function Home() {
 
                 <button
                   onClick={() => setShowEnergyModal(false)}
-                  className="text-[10px] text-gray-500 font-bold uppercase tracking-widest hover:text-white transition-colors p-2"
+                  className="w-full py-4 rounded-2xl bg-white/5 text-gray-400 font-bold text-xs uppercase tracking-widest hover:bg-white/10 transition-colors"
                 >
-                  Cancel & Wait
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Offline Earnings Modal Overlay */}
+            {offlineEarned > 0 && (
+              <div className="absolute inset-[-40px] z-[60] bg-black/80 backdrop-blur-xl rounded-[4rem] border border-purple-500/30 flex flex-col items-center justify-center p-6 text-center shadow-[0_0_100px_rgba(168,85,247,0.2)] animate-in fade-in zoom-in duration-500">
+                <div className="w-20 h-20 bg-purple-900/40 rounded-full flex items-center justify-center mb-4 border-2 border-purple-500/50 relative overflow-hidden">
+                  <div className="absolute inset-0 bg-purple-500/20 animate-pulse"></div>
+                  <span className="text-4xl relative z-10 drop-shadow-[0_0_10px_rgba(168,85,247,1)]">💤</span>
+                </div>
+                <h3 className="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-500 italic mb-2 tracking-widest uppercase">Virus Mutated<br />While Sleeping</h3>
+                <p className="text-sm font-bold text-gray-300 mb-6 px-4">
+                  Your offline mining rigs successfully harvested <span className="text-purple-400">+{offlineEarned.toLocaleString()}</span> points.
+                </p>
+
+                <button
+                  onClick={() => setOfflineEarned(0)}
+                  className="w-full py-4 rounded-3xl bg-gradient-to-r from-purple-600 to-pink-600 text-white font-black text-sm uppercase tracking-widest shadow-[0_0_20px_rgba(168,85,247,0.4)] hover:scale-105 active:scale-95 transition-all"
+                >
+                  Collect Points
                 </button>
               </div>
             )}
@@ -656,60 +685,6 @@ export default function Home() {
               </div>
             )}
 
-            {/* Upgrades Shop Modal */}
-            {showUpgradesModal && (
-              <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-xl flex flex-col items-center justify-center p-6 animate-in fade-in zoom-in duration-300">
-                <div className="w-full max-w-sm bg-gray-950 border border-purple-500/30 p-6 rounded-3xl flex flex-col items-center shadow-[0_0_50px_rgba(168,85,247,0.2)]">
-                  <h3 className="text-2xl font-black text-purple-400 italic mb-1">IDLE TERMINAL</h3>
-                  <p className="text-[10px] text-gray-400 mb-6 text-center uppercase tracking-wider relative">
-                    <span className="absolute -left-6 top-1/2 -translate-y-1/2 w-4 h-[1px] bg-purple-500/50"></span>
-                    Passive Network Mining
-                    <span className="absolute -right-6 top-1/2 -translate-y-1/2 w-4 h-[1px] bg-purple-500/50"></span>
-                  </p>
-
-                  <div className="flex flex-col gap-3 w-full">
-                    {[
-                      { id: 'card_botnet', name: 'Botnet Node', cost: 1000, rate: 50, icon: '🖥️' },
-                      { id: 'card_dna_synth', name: 'DNA Sandbox', cost: 5000, rate: 300, icon: '🧬' },
-                      { id: 'card_quantum_cpu', name: 'Quantum Core', cost: 25000, rate: 1500, icon: '💎' },
-                    ].map(card => {
-                      const owned = offlineCards.includes(card.id);
-                      return (
-                        <div key={card.id} className={`flex items-center justify-between p-3 rounded-xl border transition-all ${owned ? 'bg-purple-900/20 border-purple-500/50 shadow-[0_0_15px_rgba(168,85,247,0.2)]' : 'bg-black/50 border-white/5 hover:border-white/20'}`}>
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-white/5 rounded-lg flex items-center justify-center text-xl border border-white/5 shadow-inner">
-                              {card.icon}
-                            </div>
-                            <div className="flex flex-col">
-                              <span className={`text-xs font-bold uppercase ${owned ? 'text-purple-300' : 'text-white'}`}>{card.name}</span>
-                              <span className="text-[10px] text-purple-400/80 font-mono tracking-widest">+{card.rate} PTS/HR</span>
-                            </div>
-                          </div>
-                          <button
-                            disabled={owned || points < card.cost}
-                            onClick={() => buyOfflineCard(card.id, card.cost, card.rate)}
-                            className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-colors ${owned ? 'bg-purple-500 text-white' : (points >= card.cost ? 'bg-purple-500/20 text-purple-300 border border-purple-500/50 hover:bg-purple-500 hover:text-white' : 'bg-white/5 text-gray-600')}`}
-                          >
-                            {owned ? 'ACTIVE' : `${(card.cost / 1000)}K PTS`}
-                          </button>
-                        </div>
-                      )
-                    })}
-                  </div>
-
-                  <p className="text-[9px] text-gray-500 mt-4 text-center max-w-[200px] leading-relaxed">
-                    Upgrades generate points even while the app is closed. Max passive generation time is 8 hours.
-                  </p>
-
-                  <button
-                    onClick={() => setShowUpgradesModal(false)}
-                    className="mt-6 text-[10px] text-gray-400 font-bold uppercase tracking-widest hover:text-white p-3 border border-gray-800 hover:border-gray-600 rounded-lg transition-all w-full bg-gray-900/50"
-                  >
-                    Close Terminal
-                  </button>
-                </div>
-              </div>
-            )}
           </section>
 
           {/* Controls */}
@@ -990,6 +965,83 @@ export default function Home() {
                   {!isUnlocked && (
                     <p className="text-[8px] text-gray-600 mt-2 font-bold uppercase tracking-widest text-center">Requires Evolution</p>
                   )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* =========== TAB: LAB (Offline Earning Upgrades) =========== */}
+      {currentTab === 'lab' && (
+        <div className="flex-1 w-full h-full relative overflow-y-auto pb-24 z-10 p-6 flex flex-col animate-in fade-in zoom-in-95 duration-300">
+          <div className="flex flex-col items-center mb-6">
+            <div className="w-16 h-16 border-2 border-pink-500 rounded-full flex items-center justify-center mb-4 shadow-[0_0_20px_rgba(236,72,153,0.4)]">
+              <span className="text-3xl">🧬</span>
+            </div>
+            <h2 className="text-3xl font-black italic tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-pink-500 to-purple-500 uppercase text-center">The Lab</h2>
+            <p className="text-xs text-gray-400 text-center uppercase tracking-widest mt-2">Idle Earning Upgrades</p>
+          </div>
+
+          <div className="w-full bg-purple-900/20 border border-purple-500/30 rounded-2xl p-4 mb-6 flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-[10px] text-purple-400 uppercase font-black tracking-widest">Current Rate</span>
+              <span className="text-2xl font-black text-purple-300">{offlinePointsRate} <span className="text-xs">PTS/HR</span></span>
+            </div>
+            <div className="w-12 h-12 bg-purple-500/20 rounded-full flex items-center justify-center border border-purple-500/50 animate-pulse">
+              <span className="text-xl">⚙️</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            {[
+              { id: 'card_basic_mining', name: 'Basic Mining Rig', cost: 1000, rateIncrease: 50, icon: '🖥️' },
+              { id: 'card_advanced_ai', name: 'Advanced AI Trader', cost: 5000, rateIncrease: 300, icon: '🧠' },
+              { id: 'card_quantum_processor', name: 'Quantum Processor', cost: 25000, rateIncrease: 2000, icon: '⚛️' },
+              { id: 'card_dark_matter', name: 'Dark Matter Harvester', cost: 100000, rateIncrease: 10000, icon: '🌌' }
+            ].map(card => {
+              const owned = offlineCards.includes(card.id);
+              const affordable = points >= card.cost;
+              return (
+                <div key={card.id} className={`w-full border rounded-2xl p-4 flex flex-col gap-3 transition-all ${owned ? 'bg-black/80 border-gray-600 opacity-50' : 'bg-black/60 border-pink-500/30 hover:border-pink-500/60'}`}>
+                  <div className="flex justify-between items-start">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-lg bg-pink-500/10 flex items-center justify-center text-xl border border-pink-500/20">
+                        {card.icon}
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="font-bold text-sm text-white uppercase tracking-wider">{card.name}</span>
+                        <span className="text-[10px] uppercase text-[#00ffcc] tracking-widest">+{card.rateIncrease} PTS/HR</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    disabled={owned}
+                    onClick={async () => {
+                      if (!affordable && !owned) {
+                        alert("Not enough Points!");
+                        return;
+                      }
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                      const tg = (window as any).Telegram?.WebApp;
+                      const initData = tg?.initData || "";
+                      const success = await buyOfflineCardServer(card.id, initData);
+                      if (success) {
+                        alert(`Purchased ${card.name}! Your idle rate increased by ${card.rateIncrease}/hr.`);
+                      } else {
+                        alert("Failed to purchase card.");
+                      }
+                    }}
+                    className={`w-full py-2.5 rounded-xl font-black text-xs uppercase tracking-widest ${owned
+                      ? 'bg-gray-800 text-gray-500 cursor-not-allowed'
+                      : affordable
+                        ? 'bg-gradient-to-r from-pink-600 to-purple-600 text-white shadow-[0_0_15px_rgba(236,72,153,0.3)] hover:scale-[1.02] active:scale-95 transition-transform'
+                        : 'bg-red-900/50 text-red-300 border border-red-500/50 cursor-not-allowed'
+                      }`}
+                  >
+                    {owned ? 'Owned' : affordable ? `Buy (${card.cost} PTS)` : `Need ${card.cost} PTS`}
+                  </button>
                 </div>
               );
             })}

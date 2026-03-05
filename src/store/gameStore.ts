@@ -52,8 +52,9 @@ interface GameState {
     mutate: (serverData: MutationServerResponse) => void;
     syncState: (data: any) => void;
     checkStreak: (initDataStr: string) => Promise<{ bonusPoints: number, bonusGold: number, alreadyClaimed: boolean } | void>;
-    buyOfflineCard: (cardId: string, cost: number, rateIncrease: number) => boolean;
-    claimOfflinePoints: () => number;
+    buyOfflineCard: (cardId: string, cost: number, rateIncrease: number) => Promise<boolean>;
+    buyOfflineCardServer: (cardId: string, initData: string) => Promise<boolean>;
+    claimOfflinePoints: (initData: string) => Promise<number>;
 }
 
 export const useGameStore = create<GameState>()(
@@ -179,38 +180,52 @@ export const useGameStore = create<GameState>()(
                 }
             },
 
-            buyOfflineCard: (cardId, cost, rateIncrease) => {
-                const { points, offlineCards } = get();
-                if (points >= cost && !offlineCards.includes(cardId)) {
-                    set((state) => ({
-                        points: state.points - cost,
-                        offlinePointsRate: state.offlinePointsRate + rateIncrease,
-                        offlineCards: [...state.offlineCards, cardId],
-                        // Auto-claim any pending points before rate changes
-                        lastOfflineClaim: Date.now()
-                    }));
-                    return true;
-                }
+            buyOfflineCard: async (cardId, cost, rateIncrease) => {
+                // FALLBACK for old UI or signature mismatch, though unused currently.
+                console.warn('buyOfflineCard requires initData now. Use UI that passes it.');
                 return false;
             },
 
-            claimOfflinePoints: () => {
-                // P0-03 FIX: Atomic updater to prevent concurrent state overwrites
-                const { offlinePointsRate, lastOfflineClaim } = get();
-                if (offlinePointsRate <= 0) return 0;
-
-                const now = Date.now();
-                const hoursElapsed = (now - lastOfflineClaim) / 3600000;
-                const rewardHours = Math.min(hoursElapsed, 8);
-                const earnedPoints = Math.floor(rewardHours * offlinePointsRate);
-
-                if (earnedPoints > 0) {
-                    set((state) => ({
-                        points: state.points + earnedPoints,
-                        lastOfflineClaim: now
-                    }));
+            // NEW: Server-authoritative buy card
+            buyOfflineCardServer: async (cardId: string, initData: string) => {
+                try {
+                    const res = await fetch('/api/v1/game/buy-offline-card', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': initData },
+                        body: JSON.stringify({ cardId })
+                    });
+                    const result = await res.json();
+                    if (result.success && result.data) {
+                        set({
+                            points: result.data.points,
+                            offlinePointsRate: result.data.offlinePointsRate,
+                            offlineCards: result.data.offlineCards
+                        });
+                        return true;
+                    }
+                    return false;
+                } catch (e) {
+                    console.error("Failed to buy card", e);
+                    return false;
                 }
-                return earnedPoints;
+            },
+
+            claimOfflinePoints: async (initData: string) => {
+                try {
+                    const res = await fetch('/api/v1/game/claim-offline', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-TG-Init-Data': initData }
+                    });
+                    const result = await res.json();
+                    if (result.success && result.data && result.data.earnedPoints > 0) {
+                        set({ points: result.data.newPoints, offlinePointsRate: result.data.offlinePointsRate });
+                        return result.data.earnedPoints;
+                    }
+                    return 0;
+                } catch (e) {
+                    console.error("Failed to claim offline points", e);
+                    return 0;
+                }
             },
 
             mutate: (serverData: MutationServerResponse) => set((state) => {
